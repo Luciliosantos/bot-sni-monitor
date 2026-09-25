@@ -8,7 +8,7 @@ set_time_limit(0);
 // ==============================================
 $token = '8662843036:AAG3ZQP5vTG47oMqgLqQ2bYVWLj4lH03fMI';
 $admin_id = 7761133138;
-$grupo_id = -100COLOCA_ID_DO_GRUPO_AQUI;
+$grupo_id = -1003820426660;
 
 $api = "https://api.telegram.org/bot$token/";
 $offset = 0;
