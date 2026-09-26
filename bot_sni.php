@@ -6,8 +6,7 @@ set_time_limit(0);
 // ==============================================
 // 🔑 DADOS — JÁ PREENCHIDOS
 // ==============================================
-$token = '8662843036:AAG3ZQP5vTG47oMqgLqQ2bYVWLj4lH03fM
-I';
+$token = '8662843036:AAG3ZQP5vTG47oMqgLqQ2bYVWLj4lH03fMI';
 $admin_id = 7761133138;
 $grupo_id = -1003820426660;
 
