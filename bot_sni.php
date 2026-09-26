@@ -4,10 +4,9 @@ ini_set('display_errors', 0);
 set_time_limit(0);
 
 // ==============================================
-// 🔑 DADOS — PREENCHA!
+// 🔑 DADOS — JÁ PREENCHIDOS
 // ==============================================
-$token = '8662843036:AAG3ZQP5vTG47oMqgLqQ2bYVWLj4lH03fM
-I';
+$token = '8662843036:AAG3ZQP5vTG47oMqgLqQ2bYVWLj4lH03fM';
 $admin_id = 7761133138;
 $grupo_id = -1003820426660;
 
@@ -15,243 +14,235 @@ $api = "https://api.telegram.org/bot$token/";
 $offset = 0;
 
 // ==============================================
-// 💾 BANCO DE DOMÍNIOS — alimentado automaticamente
+// 💾 BANCO DE DADOS — salva os que funcionam
 // ==============================================
-$arquivo_dominios = __DIR__ . '/dominios_conhecidos.json';
-$arquivo_descobertos = __DIR__ . '/descobertos.json';
+$arquivo_vivos = __DIR__ . '/vivos.json';
+$arquivo_tentados = __DIR__ . '/tentados.json';
 
-function carregarLista($arquivo, $padrao = []) {
-    if (file_exists($arquivo)) return json_decode(file_get_contents($arquivo), true) ?: $padrao;
-    return $padrao;
+function carregar($arq, $padrao = []) {
+    return file_exists($arq) ? json_decode(file_get_contents($arq), true) ?: $padrao : $padrao;
 }
-function salvarLista($arquivo, $dados) {
-    file_put_contents($arquivo, json_encode($dados, JSON_PRETTY_PRINT));
+function salvar($arq, $dados) {
+    file_put_contents($arq, json_encode($dados, JSON_PRETTY_PRINT));
 }
 
-// Lista base inicial — o bot vai expandir sozinho
-$base_inicial = [
-    ['nome' => 'cloudflare.com', 'fonte' => 'base', 'categoria' => 'CDN'],
-    ['nome' => 'cdnjs.cloudflare.com', 'fonte' => 'base', 'categoria' => 'CDN'],
-    ['nome' => 'cdn.telegram.org', 'fonte' => 'base', 'categoria' => 'CDN'],
-    ['nome' => 'static.telegram.org', 'fonte' => 'base', 'categoria' => 'CDN'],
-    ['nome' => 'jsdelivr.net', 'fonte' => 'base', 'categoria' => 'CDN'],
-    ['nome' => 'akamaiedge.net', 'fonte' => 'base', 'categoria' => 'CDN'],
-    ['nome' => 'fastly.com', 'fonte' => 'base', 'categoria' => 'CDN'],
-    ['nome' => 'github.com', 'fonte' => 'base', 'categoria' => 'GLOBAL'],
-    ['nome' => 'raw.githubusercontent.com', 'fonte' => 'base', 'categoria' => 'GLOBAL'],
-    ['nome' => 'google.com', 'fonte' => 'base', 'categoria' => 'GLOBAL'],
-    ['nome' => 'youtube.com', 'fonte' => 'base', 'categoria' => 'GLOBAL'],
-    ['nome' => 'facebook.com', 'fonte' => 'base', 'categoria' => 'GLOBAL'],
-    ['nome' => 'instagram.com', 'fonte' => 'base', 'categoria' => 'GLOBAL'],
-    ['nome' => 'wikipedia.org', 'fonte' => 'base', 'categoria' => 'GLOBAL'],
-    ['nome' => 'speedtest.net', 'fonte' => 'base', 'categoria' => 'GLOBAL'],
-    ['nome' => 'vivo.com.br', 'fonte' => 'base', 'categoria' => 'BRASIL'],
-    ['nome' => 'claro.com.br', 'fonte' => 'base', 'categoria' => 'BRASIL'],
-    ['nome' => 'tim.com.br', 'fonte' => 'base', 'categoria' => 'BRASIL'],
+// ==============================================
+// 🌐 BASE PARA DESCOBRIR — raízes + prefixos
+// ==============================================
+$dominios_raiz = [
+    'vivo.com.br', 'vivo.com', 'claro.com.br', 'claro.com',
+    'tim.com.br', 'tim.com', 'cloudflare.com', 'github.com',
+    'telegram.org', 'google.com', 'youtube.com', 'facebook.com',
+    'instagram.com', 'akamaiedge.net', 'fastly.com', 'jsdelivr.net',
+    'speedtest.net', 'wikipedia.org', 'opendns.com', 'github.io'
+];
+
+$prefixos = [
+    'cdn', 'www', 'app', 'api', 'sso', 'login', 'auth', 'media',
+    'static', 'img', 'video', 'cloud', 'edge', 'mail', 'news',
+    'dev', 'staging', 'admin', 'portal', 'servicos', 'atendimento',
+    'loja', 'pagamento', 'checkout', 'upload', 'download', 'data',
+    'vpn', 'proxy', 'gateway', 'node', 'server', 'relay', 'bridge'
 ];
 
 // ==============================================
-// 🌐 PASSO 1: BUSCAR NOVOS DOMÍNIOS DA REDE
+// 🔍 GERAR NOVOS SUBDOMÍNIOS PARA TESTAR
 // ==============================================
-function buscarNovosDominios() {
+function gerarNovos($raizes, $prefixos, $ja_tentados, $limite = 15) {
     $novos = [];
+    shuffle($raizes); shuffle($prefixos);
     
-    // Fontes públicas atualizadas
-    $fontes = [
-        'https://cdn.jsdelivr.net/npm/publicsuffixlist@latest/list/public_suffix_list.dat',
-        'https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/cdn-names.txt',
-        'https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/top-10000-domains.txt',
+    foreach ($raizes as $raiz) {
+        foreach ($prefixos as $p) {
+            $completo = "$p.$raiz";
+            if (!in_array($completo, $ja_tentados)) {
+                $novos[] = $completo;
+                if (count($novos) >= $limite) return $novos;
+            }
+        }
+    }
+    return $novos;
+}
+
+// ==============================================
+// ✅ TESTAR — Status HTTP 200 + Portas
+// ==============================================
+function testarDominio($host, $timeout = 2) {
+    $resultado = [
+        'host' => $host,
+        'porta80' => ['ok' => false, 'codigo' => 0, 'ms' => 0],
+        'porta443' => ['ok' => false, 'codigo' => 0, 'ms' => 0],
+        'encontrado_em' => date('Y-m-d')
     ];
     
-    foreach ($fontes as $fonte) {
-        $dados = @file_get_contents($fonte, false, ['timeout' => 8]);
-        if (!$dados) continue;
-        
-        preg_match_all('/([a-zA-Z0-9][a-zA-Z0-9\-\.]*\.(com|net|org|br|cloud|io|co))/i', $dados, $m);
-        foreach (array_unique($m[1] ?? []) as $dom) {
-            if (strlen($dom) > 5 && !in_array($dom, ['example.com', 'test.com'])) {
-                $novos[] = strtolower(trim($dom));
-            }
-        }
-        usleep(200000);
-    }
+    // Teste PORTA 80 — HTTP + status 200
+    $i = microtime(true);
+    $ch = curl_init("http://$host/");
+    curl_setopt_array($ch, [
+        CURLOPT_TIMEOUT => $timeout,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_HEADER => false,
+        CURLOPT_NOBODY => true, // só cabeçalho = rápido
+    ]);
+    curl_exec($ch);
+    $cod = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $ms = round((microtime(true) - $i) * 1000);
+    $resultado['porta80']['codigo'] = $cod;
+    $resultado['porta80']['ok'] = ($cod >= 200 && $cod < 400); // 200-399 = vivo
+    $resultado['porta80']['ms'] = $ms;
+    curl_close($ch);
     
-    // Gera variações inteligentes
-    $base_var = ['cdn', 'www', 'app', 'api', 'sso', 'login', 'static', 'media', 'img', 'video', 'cloud', 'edge'];
-    $extras = [];
-    foreach ($novos as $d) {
-        $partes = explode('.', $d);
-        if (count($partes) >= 2) {
-            $raiz = implode('.', array_slice($partes, -2));
-            foreach ($base_var as $pref) {
-                $extras[] = "$pref.$raiz";
-            }
-        }
-    }
-    $novos = array_unique(array_merge($novos, $extras));
+    // Teste PORTA 443 — HTTPS + status 200
+    $i = microtime(true);
+    $ch = curl_init("https://$host/");
+    curl_setopt_array($ch, [
+        CURLOPT_TIMEOUT => $timeout,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_HEADER => false,
+        CURLOPT_NOBODY => true,
+    ]);
+    curl_exec($ch);
+    $cod = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $ms = round((microtime(true) - $i) * 1000);
+    $resultado['porta443']['codigo'] = $cod;
+    $resultado['porta443']['ok'] = ($cod >= 200 && $cod < 400);
+    $resultado['porta443']['ms'] = $ms;
+    curl_close($ch);
     
-    return array_slice($novos, 0, 150); // Limita pra não travar
-}
-
-// ==============================================
-// 🔍 PASSO 2: TESTAR CONEXÃO
-// ==============================================
-function testarHost($host, $porta, $timeout = 2.5) {
-    $inicio = microtime(true);
-    
-    if ($porta == 443) {
-        $ctx = stream_context_create([
-            'ssl' => ['verify_peer' => false, 'verify_peer_name' => false, 'SNI_enabled' => true]
-        ]);
-        $fp = @stream_socket_client("ssl://$host:$porta", $e, $es, $timeout, STREAM_CLIENT_CONNECT, $ctx);
-    } else {
-        $fp = @fsockopen($host, $porta, $e, $es, $timeout);
-    }
-    
-    $ms = round((microtime(true) - $inicio) * 1000);
-    if ($fp) { fclose($fp); return ['ok' => true, 'ms' => $ms]; }
-    return ['ok' => false, 'ms' => 0];
-}
-
-// ==============================================
-// ✅ PASSO 3: VERIFICAR E CLASSIFICAR
-// ==============================================
-function verificarETriar($lista) {
-    $ativos = [];
-    $novos_descobertos = [];
-    
-    foreach ($lista as $item) {
-        $host = is_array($item) ? $item['nome'] : $item;
-        $cat = is_array($item) ? ($item['categoria'] ?? 'DESCOBERTO') : 'DESCOBERTO';
-        $fonte = is_array($item) ? ($item['fonte'] ?? 'escaneio') : 'escaneio';
-        
-        $p80 = testarHost($host, 80);
-        $p443 = testarHost($host, 443);
-        
-        if ($p80['ok'] || $p443['ok']) {
-            $ativos[] = [
-                'nome' => $host,
-                'categoria' => $cat,
-                'fonte' => $fonte,
-                'porta80' => $p80,
-                'porta443' => $p443,
-                'descoberto_em' => date('Y-m-d')
-            ];
-            if ($fonte === 'escaneio') $novos_descobertos[] = $host;
-        }
-        usleep(100000);
-    }
-    
-    return [$ativos, $novos_descobertos];
+    return $resultado;
 }
 
 // ==============================================
 // 📤 ENVIAR NO TELEGRAM
 // ==============================================
-function enviarMsg($chat_id, $texto, $api) {
-    $ch = curl_init($api . 'sendMessage');
+function msg($cid, $texto, $api) {
+    $ch = curl_init($api.'sendMessage');
     curl_setopt_array($ch, [
         CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => ['chat_id' => $chat_id, 'text' => $texto, 'parse_mode' => 'HTML'],
+        CURLOPT_POSTFIELDS => ['chat_id' => $cid, 'text' => $texto, 'parse_mode' => 'HTML'],
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 15
     ]);
-    curl_exec($ch);
-    curl_close($ch);
+    curl_exec($ch); curl_close($ch);
     usleep(350000);
 }
 
-function montarEEnviar($lista, $chat_id, $api, $qtd_novos = 0) {
-    $grupos = [];
-    foreach ($lista as $item) {
-        $cat = $item['categoria'];
-        if (!isset($grupos[$cat])) $grupos[$cat] = [];
-        $linha = "<code>{$item['nome']}</code>\n";
-        $linha .= $item['porta80']['ok'] ? "  ✅ 80 → {$item['porta80']['ms']}ms\n" : "  ❌ 80\n";
-        $linha .= $item['porta443']['ok'] ? "  ✅ 443 → {$item['porta443']['ms']}ms\n" : "  ❌ 443\n";
-        if ($item['fonte'] === 'escaneio') $linha .= "  🆕 DESCOBERTO AGORA\n";
-        $grupos[$cat][] = $linha;
+function montarLista($vivos, $novos_encontrados, $cid, $api) {
+    if (empty($vivos)) {
+        msg($cid, "🔍 Nenhum domínio ativo ainda. Continuando busca...", $api);
+        return;
     }
     
-    $cab = "🌐 <b>ESCANEIO GLOBAL — " . date('d/m/Y H:i') . "</b>\n";
-    $cab .= "📊 Total ativos: " . count($lista);
-    $cab .= ($qtd_novos > 0) ? " | 🆕 Recém-descobertos: $qtd_novos" : "";
-    $cab .= "\n\n";
+    $texto = "🌐 <b>SUBDOMÍNIOS ATIVOS — STATUS 200 OK</b>\n";
+    $texto .= "📊 Total: " . count($vivos) . " | 🆕 Recém-descobertos: " . count($novos_encontrados) . "\n\n";
     
-    $primeira = true;
-    foreach ($grupos as $cat => $itens) {
-        $msg = ($primeira ? $cab : '') . "<b>📂 $cat</b>\n" . implode('', $itens) . "\n";
-        if ($primeira) $msg .= "💡 Copia o domínio → usa no SNI/Host do VPN\n";
-        enviarMsg($chat_id, $msg, $api);
-        $primeira = false;
+    foreach ($vivos as $d) {
+        $texto .= "<code>{$d['host']}</code>";
+        if (in_array($d['host'], $novos_encontrados)) $texto .= " 🆕";
+        $texto .= "\n";
+        $texto .= $d['porta80']['ok'] ? "  ✅ 80 ({$d['porta80']['codigo']}) → {$d['porta80']['ms']}ms\n" : "  ❌ 80\n";
+        $texto .= $d['porta443']['ok'] ? "  ✅ 443 ({$d['porta443']['codigo']}) → {$d['porta443']['ms']}ms\n" : "  ❌ 443\n";
+        $texto .= "\n";
     }
+    
+    $texto .= "💡 Copia o domínio → usa no SNI/Host do VPN\n";
+    msg($cid, $texto, $api);
 }
 
 // ==============================================
 // 🤖 LOOP PRINCIPAL
 // ==============================================
-echo "🤖 BOT ESCANEAR GLOBAL INICIADO!\n";
-$ultimo_escaneio = 0;
-$intervalo = 2700; // 45 min = escaneio completo
+echo "🤖 BOT DESCOBRIDOR DE SUBDOMÍNIOS INICIADO!\n";
+echo "📋 15 novos por vez | A cada 15 min | Status 200 OK\n";
 
-// Carrega base
-$dominios = carregarLista($arquivo_dominios, $base_inicial);
+$ultimo_escaneio = 0;
+$intervalo = 900; // 15 minutos
+
+// Carrega histórico
+$vivos = carregar($arquivo_vivos, []);
+$tentados = carregar($arquivo_tentados, []);
 
 while (true) {
     // Comandos do Telegram
-    $resp = @file_get_contents($api . "getUpdates?offset=$offset&timeout=5");
+    $resp = @file_get_contents($api."getUpdates?offset=$offset&timeout=5");
     if ($resp) {
         $dados = json_decode($resp, true);
-        foreach ($dados['result'] ?? [] as $upd) {
+        foreach ($dados['result']??[] as $upd) {
             $offset = $upd['update_id'] + 1;
-            $msg = $upd['message']['text'] ?? '';
-            $cid = $upd['message']['chat']['id'] ?? 0;
+            if (!isset($upd['message'])) continue;
             
-            if ($msg === '/start') {
-                enviarMsg($cid, "🌐 <b>ESCANEADOR GLOBAL DE SNI</b>\n\nComandos:\n/scan — Escanear e descobrir NOVOS domínios\n/check — Verificar lista atual\n/status — Estatísticas\n\n🔄 O bot escaneia a rede sozinho e aprende novos hosts!", $api);
+            $txt = trim($upd['message']['text'] ?? '');
+            $cid = $upd['message']['chat']['id'];
+            
+            if ($txt === '/start') {
+                msg($cid, "🌐 <b>DESCOBRIDOR DE SUBDOMÍNIOS SNI</b>\n\nComandos:\n/scan — Descobrir e testar 15 novos\n/lista — Ver os que já estão vivos\n/status — Estatísticas\n\n🔄 O bot busca sozinho, testa status 200 e guarda os vivos!\n📋 15 por vez = leve e não trava ✅", $api);
             }
-            elseif ($msg === '/scan' && ($cid == $admin_id || $grupo_id < 0)) {
-                enviarMsg($cid, "🔍 Escaneando rede global... aguarde!\nIsso pode levar ~1 minuto", $api);
+            elseif ($txt === '/scan' && ($cid == $admin_id || $grupo_id < 0)) {
+                msg($cid, "🔍 Buscando 15 novos subdomínios... aguarde!", $api);
                 
-                $novos_brutos = buscarNovosDominios();
-                $todos_juntos = array_merge($dominios, $novos_brutos);
-                list($ativos, $descobertos) = verificarETriar($todos_juntos);
+                $para_testar = gerarNovos($dominios_raiz, $prefixos, $tentados, 15);
+                $novos_vivos = [];
+                $achou_agora = [];
                 
-                // Atualiza banco
-                foreach ($descobertos as $dn) {
-                    $dominios[] = ['nome' => $dn, 'fonte' => 'escaneio', 'categoria' => 'DESCOBERTO'];
+                foreach ($para_testar as $host) {
+                    $tentados[] = $host; // marca como testado
+                    $res = testarDominio($host);
+                    
+                    if ($res['porta80']['ok'] || $res['porta443']['ok']) {
+                        $novos_vivos[] = $res;
+                        $achou_agora[] = $host;
+                    }
+                    usleep(150000); // pausa = não sobrecarrega
                 }
-                salvarLista($arquivo_dominios, $dominios);
                 
-                montarEEnviar($ativos, $cid, $api, count($descobertos));
+                // Mescla e salva
+                $vivos = array_merge($novos_vivos, $vivos);
+                salvar($arquivo_vivos, $vivos);
+                salvar($arquivo_tentados, array_unique($tentados));
+                
+                montarLista($vivos, $achou_agora, $cid, $api);
             }
-            elseif ($msg === '/check' && ($cid == $admin_id || $grupo_id < 0)) {
-                enviarMsg($cid, "✅ Verificando " . count($dominios) . " domínios conhecidos...", $api);
-                list($ativos,) = verificarETriar($dominios);
-                montarEEnviar($ativos, $cid, $api);
+            elseif ($txt === '/lista') {
+                montarLista($vivos, [], $cid, $api);
             }
-            elseif ($msg === '/status') {
-                enviarMsg($cid, "📊 <b>ESTATÍSTICAS</b>\n\nDomínios conhecidos: " . count($dominios) . "\nÚltimo escaneio: " . date('d/m/Y H:i', $ultimo_escaneio ?: time()) . "\nPróximo escaneio automático: a cada 45 min\n\n🟢 O bot aprende sozinho!", $api);
+            elseif ($txt === '/status') {
+                $prox = $ultimo_escaneio ? max(0, $intervalo - (time() - $ultimo_escaneio)) : 0;
+                msg($cid, "📊 <b>ESTATÍSTICAS</b>\n\n✅ Vivos: " . count($vivos) . "\n🔍 Já testados: " . count($tentados) . "\n⏰ Próximo escaneio automático: " . ($prox ? ceil($prox/60)." min" : "agora") . "\n\nA cada 15 min busca 15 novos!", $api);
             }
         }
     }
     
     // Escaneio automático no grupo
     if ($grupo_id < 0 && time() - $ultimo_escaneio >= $intervalo) {
-        echo "[" . date('H:i') . "] Escaneio automático iniciado...\n";
-        $novos_brutos = buscarNovosDominios();
-        $todos_juntos = array_merge($dominios, $novos_brutos);
-        list($ativos, $descobertos) = verificarETriar($todos_juntos);
+        echo "[".date('H:i')."] Escaneio automático...\n";
         
-        foreach ($descobertos as $dn) {
-            $dominios[] = ['nome' => $dn, 'fonte' => 'escaneio', 'categoria' => 'DESCOBERTO'];
+        $para_testar = gerarNovos($dominios_raiz, $prefixos, $tentados, 15);
+        $novos_vivos = []; $achou_agora = [];
+        
+        foreach ($para_testar as $host) {
+            $tentados[] = $host;
+            $res = testarDominio($host);
+            if ($res['porta80']['ok'] || $res['porta443']['ok']) {
+                $novos_vivos[] = $res;
+                $achou_agora[] = $host;
+            }
+            usleep(150000);
         }
-        salvarLista($arquivo_dominios, $dominios);
         
-        montarEEnviar($ativos, $grupo_id, $api, count($descobertos));
+        $vivos = array_merge($novos_vivos, $vivos);
+        salvar($arquivo_vivos, $vivos);
+        salvar($arquivo_tentados, array_unique($tentados));
+        
+        montarLista($vivos, $achou_agora, $grupo_id, $api);
         $ultimo_escaneio = time();
-        echo "[" . date('H:i') . "] Escaneio concluído — " . count($ativos) . " ativos, " . count($descobertos) . " novos\n";
+        echo "[".date('H:i')."] Concluído — " . count($novos_vivos) . " novos vivos\n";
     }
     
-    sleep(2);
+    sleep(3);
 }
